@@ -1,5 +1,7 @@
 // Package postgres wraps postgres (pq) driver as an adapter for REL.
 //
+// Deprecated: Please use github.com/go-rel/postgres instead.
+//
 // Usage:
 //	// open postgres connection.
 //	adapter, err := postgres.Open("postgres://postgres@localhost/rel_test?sslmode=disable")
@@ -41,6 +43,8 @@ var (
 )
 
 // New postgres adapter using existing connection.
+//
+// Deprecated: Please use github.com/go-rel/postgres instead.
 func New(database *db.DB) *Adapter {
 	return &Adapter{
 		Adapter: &sql.Adapter{

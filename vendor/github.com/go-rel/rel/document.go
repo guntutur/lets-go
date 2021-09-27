@@ -80,20 +80,12 @@ func (d Document) ReflectValue() reflect.Value {
 
 // Table returns name of the table.
 func (d Document) Table() string {
-	if tn, ok := d.v.(table); ok {
-		return tn.Table()
-	}
-
 	// TODO: handle anonymous struct
 	return tableName(d.rt)
 }
 
 // PrimaryFields column name of this document.
 func (d Document) PrimaryFields() []string {
-	if p, ok := d.v.(primary); ok {
-		return p.PrimaryFields()
-	}
-
 	if len(d.data.primaryField) == 0 {
 		panic("rel: failed to infer primary key for type " + d.rt.String())
 	}
@@ -335,8 +327,14 @@ func (d Document) Association(name string) Association {
 func (d Document) Reset() {
 }
 
-// Add returns this document, this is a noop for compatibility with collection.
+// Add returns this document.
 func (d *Document) Add() *Document {
+	// if d.rv is a null pointer, set it to a new struct.
+	if d.rv.Kind() == reflect.Ptr && d.rv.IsNil() {
+		d.rv.Set(reflect.New(d.rv.Type().Elem()))
+		d.rv = d.rv.Elem()
+	}
+
 	return d
 }
 
@@ -382,7 +380,9 @@ func newDocument(v interface{}, rv reflect.Value, readonly bool) *Document {
 			panic("rel: must be a pointer to struct")
 		}
 	} else {
-		rv = rv.Elem()
+		if !rv.IsNil() {
+			rv = rv.Elem()
+		}
 		rt = rt.Elem()
 	}
 
@@ -563,8 +563,13 @@ func tableName(rt reflect.Type) string {
 		return name.(string)
 	}
 
-	name := inflection.Plural(rt.Name())
-	name = snaker.CamelToSnake(name)
+	var name string
+	if rt.Implements(rtTable) {
+		name = reflect.Zero(rt).Interface().(table).Table()
+	} else {
+		name = inflection.Plural(rt.Name())
+		name = snaker.CamelToSnake(name)
+	}
 
 	tablesCache.Store(rt, name)
 
