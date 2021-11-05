@@ -32,29 +32,7 @@ func (c *Collection) Table() string {
 		return tn.Table()
 	}
 
-	return c.tableName()
-}
-
-func (c Collection) tableName() string {
-	var (
-		rt = c.rt.Elem()
-	)
-
-	// check for cache
-	if name, cached := tablesCache.Load(rt); cached {
-		return name.(string)
-	}
-
-	if rt.Implements(rtTable) {
-		var (
-			v = reflect.Zero(rt).Interface().(table)
-		)
-
-		tablesCache.Store(rt, v.Table())
-		return v.Table()
-	}
-
-	return tableName(rt)
+	return tableName(c.rt.Elem())
 }
 
 // PrimaryFields column name of this collection.
@@ -156,6 +134,10 @@ func (c Collection) Add() *Document {
 		typ   = c.rt.Elem()
 		drv   = reflect.Zero(typ)
 	)
+
+	if typ.Kind() == reflect.Ptr && drv.IsNil() {
+		drv = reflect.New(drv.Type().Elem())
+	}
 
 	c.rv.Set(reflect.Append(c.rv, drv))
 
