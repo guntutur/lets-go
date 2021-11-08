@@ -1,5 +1,10 @@
 package rel
 
+import (
+	"strconv"
+	"strings"
+)
+
 // Querier interface defines contract to be used for query builder.
 type Querier interface {
 	Build(*Query)
@@ -71,6 +76,7 @@ type Query struct {
 	ReloadQuery   Reload
 	CascadeQuery  Cascade
 	PreloadQuery  []string
+	UsePrimaryDb  bool
 }
 
 // Build query.
@@ -97,7 +103,7 @@ func (q Query) Build(query *Query) {
 			query.GroupQuery = q.GroupQuery
 		}
 
-		q.SortQuery = append(q.SortQuery, query.SortQuery...)
+		query.SortQuery = append(query.SortQuery, q.SortQuery...)
 
 		if q.OffsetQuery != 0 {
 			query.OffsetQuery = q.OffsetQuery
@@ -111,8 +117,9 @@ func (q Query) Build(query *Query) {
 			query.LockQuery = q.LockQuery
 		}
 
-		query.ReloadQuery = q.ReloadQuery
-		query.CascadeQuery = q.CascadeQuery
+		query.ReloadQuery = query.ReloadQuery || q.ReloadQuery
+		query.CascadeQuery = query.CascadeQuery || q.CascadeQuery
+		query.UsePrimaryDb = query.UsePrimaryDb || q.UsePrimaryDb
 	}
 }
 
@@ -135,18 +142,18 @@ func (q Query) Distinct() Query {
 }
 
 // Join current table with other table.
-func (q Query) Join(table string) Query {
-	return q.JoinOn(table, "", "")
+func (q Query) Join(table string, filter ...FilterQuery) Query {
+	return q.JoinOn(table, "", "", filter...)
 }
 
 // JoinOn current table with other table.
-func (q Query) JoinOn(table string, from string, to string) Query {
-	return q.JoinWith("JOIN", table, from, to)
+func (q Query) JoinOn(table string, from string, to string, filter ...FilterQuery) Query {
+	return q.JoinWith("JOIN", table, from, to, filter...)
 }
 
 // JoinWith current table with other table with custom join mode.
-func (q Query) JoinWith(mode string, table string, from string, to string) Query {
-	NewJoinWith(mode, table, from, to).Build(&q) // TODO: ensure this always called last
+func (q Query) JoinWith(mode string, table string, from string, to string, filter ...FilterQuery) Query {
+	NewJoinWith(mode, table, from, to, filter...).Build(&q) // TODO: ensure this always called last
 
 	return q
 }
@@ -287,6 +294,123 @@ func (q Query) Preload(field string) Query {
 	return q
 }
 
+// UsePrimary database.
+func (q Query) UsePrimary() Query {
+	q.UsePrimaryDb = true
+	return q
+}
+
+// String describe query as string.
+func (q Query) String() string {
+	if q.SQLQuery.Statement != "" {
+		return q.SQLQuery.String()
+	}
+
+	var builder strings.Builder
+	builder.WriteString("rel")
+
+	if q.UsePrimaryDb {
+		builder.WriteString(".UsePrimary()")
+	}
+
+	if q.Table != "" {
+		builder.WriteString(".From(\"")
+		builder.WriteString(q.Table)
+		builder.WriteString("\")")
+	}
+
+	if len(q.SelectQuery.Fields) != 0 {
+		builder.WriteString(".Select(\"")
+		builder.WriteString(strings.Join(q.SelectQuery.Fields, "\", \""))
+		builder.WriteString("\")")
+	}
+
+	if q.SelectQuery.OnlyDistinct {
+		builder.WriteString(".Distinct()")
+	}
+
+	for _, jq := range q.JoinQuery {
+		builder.WriteString(".JoinWith(\"")
+		builder.WriteString(jq.Mode)
+		builder.WriteString("\", \"")
+		builder.WriteString(jq.Table)
+		builder.WriteString("\", \"")
+		builder.WriteString(jq.From)
+		builder.WriteString("\", \"")
+		builder.WriteString(jq.To)
+		builder.WriteString("\")")
+	}
+
+	if !q.WhereQuery.None() {
+		builder.WriteString(".Where(")
+		builder.WriteString(q.WhereQuery.String())
+		builder.WriteByte(')')
+	}
+
+	if len(q.GroupQuery.Fields) != 0 {
+		builder.WriteString(".Group(\"")
+		builder.WriteString(strings.Join(q.GroupQuery.Fields, "\", \""))
+		builder.WriteString("\")")
+
+		if !q.GroupQuery.Filter.None() {
+			builder.WriteString(".Having(")
+			builder.WriteString(q.GroupQuery.Filter.String())
+			builder.WriteByte(')')
+		}
+	}
+
+	for _, sq := range q.SortQuery {
+		if sq.Asc() {
+			builder.WriteString(".SortAsc(\"")
+		} else {
+			builder.WriteString(".SortDesc(\"")
+		}
+		builder.WriteString(sq.Field)
+		builder.WriteString("\")")
+	}
+
+	if q.LimitQuery > 0 {
+		builder.WriteString(".Limit(")
+		builder.WriteString(strconv.Itoa(int(q.LimitQuery)))
+		builder.WriteString(")")
+	}
+
+	if q.OffsetQuery > 0 {
+		builder.WriteString(".Offset(")
+		builder.WriteString(strconv.Itoa(int(q.OffsetQuery)))
+		builder.WriteString(")")
+	}
+
+	if q.LockQuery != "" {
+		builder.WriteString(".Lock(\"")
+		builder.WriteString(string(q.LockQuery))
+		builder.WriteString("\")")
+	}
+
+	if q.UnscopedQuery {
+		builder.WriteString(".Unscoped()")
+	}
+
+	if q.ReloadQuery {
+		builder.WriteString(".Reload()")
+	}
+
+	if !q.CascadeQuery {
+		builder.WriteString(".Cascade(false)")
+	}
+
+	if len(q.PreloadQuery) != 0 {
+		builder.WriteString(".Preload(\"")
+		builder.WriteString(strings.Join(q.PreloadQuery, "\", \""))
+		builder.WriteString("\")")
+	}
+
+	if str := builder.String(); str != "rel" {
+		return str
+	}
+	return ""
+}
+
 func newQuery() Query {
 	return Query{
 		CascadeQuery: true,
@@ -308,20 +432,20 @@ func From(table string) Query {
 }
 
 // Join create a query with chainable syntax, using join as the starting point.
-func Join(table string) Query {
-	return JoinOn(table, "", "")
+func Join(table string, filter ...FilterQuery) Query {
+	return JoinOn(table, "", "", filter...)
 }
 
 // JoinOn create a query with chainable syntax, using join as the starting point.
-func JoinOn(table string, from string, to string) Query {
-	return JoinWith("JOIN", table, from, to)
+func JoinOn(table string, from string, to string, filter ...FilterQuery) Query {
+	return JoinWith("JOIN", table, from, to, filter...)
 }
 
 // JoinWith create a query with chainable syntax, using join as the starting point.
-func JoinWith(mode string, table string, from string, to string) Query {
+func JoinWith(mode string, table string, from string, to string, filter ...FilterQuery) Query {
 	query := newQuery()
 	query.JoinQuery = []JoinQuery{
-		NewJoinWith(mode, table, from, to),
+		NewJoinWith(mode, table, from, to, filter...),
 	}
 	return query
 }
@@ -339,6 +463,12 @@ func Joinf(expr string, args ...interface{}) Query {
 func Where(filters ...FilterQuery) Query {
 	query := newQuery()
 	query.WhereQuery = And(filters...)
+	return query
+}
+
+func UsePrimary() Query {
+	query := newQuery()
+	query.UsePrimaryDb = true
 	return query
 }
 

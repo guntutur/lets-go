@@ -52,6 +52,17 @@ func (a Association) Type() AssociationType {
 // Document returns association target as document.
 // If association is zero, second return value will be false.
 func (a Association) Document() (*Document, bool) {
+	return a.document(false)
+}
+
+// LazyDocument is a lazy version of Document.
+// If rv is a null pointer, it returns a document that delays setting the value of rv
+// until Document#Add() is called.
+func (a Association) LazyDocument() (*Document, bool) {
+	return a.document(true)
+}
+
+func (a Association) document(lazy bool) (*Document, bool) {
 	var (
 		rv = a.rv.FieldByIndex(a.data.targetIndex)
 	)
@@ -59,7 +70,10 @@ func (a Association) Document() (*Document, bool) {
 	switch rv.Kind() {
 	case reflect.Ptr:
 		if rv.IsNil() {
-			rv.Set(reflect.New(rv.Type().Elem()))
+			if !lazy {
+				rv.Set(reflect.New(rv.Type().Elem()))
+			}
+
 			return NewDocument(rv), false
 		}
 
@@ -117,7 +131,7 @@ func (a Association) ReferenceField() string {
 
 // ReferenceValue of the association.
 func (a Association) ReferenceValue() interface{} {
-	return indirect(a.rv.Field(a.data.referenceIndex))
+	return indirectInterface(a.rv.Field(a.data.referenceIndex))
 }
 
 // ForeignField of the association.
@@ -140,7 +154,7 @@ func (a Association) ForeignValue() interface{} {
 		rv = rv.Elem()
 	}
 
-	return indirect(rv.Field(a.data.foreignIndex))
+	return indirectInterface(rv.Field(a.data.foreignIndex))
 }
 
 // Through return intermediary association.
