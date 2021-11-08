@@ -1,11 +1,13 @@
 package rel
 
 import (
+	"fmt"
 	"math"
 	"reflect"
+	"strings"
 )
 
-func indirect(rv reflect.Value) interface{} {
+func indirectInterface(rv reflect.Value) interface{} {
 	if rv.Kind() == reflect.Ptr {
 		if rv.IsNil() {
 			return nil
@@ -15,6 +17,14 @@ func indirect(rv reflect.Value) interface{} {
 	}
 
 	return rv.Interface()
+}
+
+func indirectReflectType(rt reflect.Type) reflect.Type {
+	if rt.Kind() == reflect.Ptr {
+		return rt.Elem()
+	}
+
+	return rt
 }
 
 func must(err error) {
@@ -94,6 +104,11 @@ func isDeepZero(rv reflect.Value, depth int) bool {
 		c := rv.Complex()
 		return math.Float64bits(real(c)) == 0 && math.Float64bits(imag(c)) == 0
 	case reflect.Array:
+		// check one level deeper if it's an uuid ([16]byte)
+		if rv.Type().Elem().Kind() == reflect.Uint8 && rv.Len() == 16 {
+			depth += 1
+		}
+
 		for i := 0; i < rv.Len(); i++ {
 			if !isDeepZero(rv.Index(i), depth-1) {
 				return false
@@ -116,4 +131,24 @@ func isDeepZero(rv reflect.Value, depth int) bool {
 	default:
 		return true
 	}
+}
+
+func fmtiface(v interface{}) string {
+	if str, ok := v.(string); ok {
+		return "\"" + str + "\""
+	}
+
+	return fmt.Sprint(v)
+}
+
+func fmtifaces(v []interface{}) string {
+	var str strings.Builder
+	for i := range v {
+		if i > 0 {
+			str.WriteString(", ")
+		}
+		str.WriteString(fmtiface(v[i]))
+	}
+
+	return str.String()
 }
